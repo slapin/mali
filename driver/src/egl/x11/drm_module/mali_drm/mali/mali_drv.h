@@ -19,16 +19,22 @@
 #define DRIVER_MINOR        1
 #define DRIVER_PATCHLEVEL   0
 
-#include "drm_sman.h"
+#include <drm/drmP.h>
 
 typedef struct drm_mali_private
 {
 	drm_local_map_t *mmio;
 	unsigned int idle_fault;
-	struct drm_sman sman;
+	struct drm_mm vram_mm;
 	int vram_initialized;
 	unsigned long vram_offset;
+	/** Mapping of userspace keys to mm objects */
+	struct idr object_idr;
 } drm_mali_private_t;
+
+struct mali_file_private {
+	struct list_head obj_list;
+};
 
 extern int mali_idle(struct drm_device *dev);
 extern void mali_reclaim_buffers_locked(struct drm_device *dev, struct drm_file *file_priv);

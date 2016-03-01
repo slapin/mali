@@ -10,15 +10,116 @@
 
 #include <linux/vermagic.h>
 #include <linux/version.h>
-#include "drmP.h"
+#include <drm/drmP.h>
+#include <drm/drm_legacy.h>
 #include "mali_drm.h"
 #include "mali_drv.h"
 
 static struct platform_device *pdev;
 
+#if 0
+static const struct drm_device_id dock_device_ids[] =
+{
+	{"MALIDRM", 0},
+	{"", 0},
+};
+#endif
+
+static int mali_driver_load(struct drm_device *dev, unsigned long chipset)
+{
+	int ret;
+	drm_mali_private_t *dev_priv;
+	printk(KERN_ERR "DRM: mali_driver_load start\n");
+
+	dev_priv = kzalloc(sizeof(drm_mali_private_t), GFP_KERNEL);
+
+	if (dev_priv == NULL)
+	{
+		return -ENOMEM;
+	}
+
+	dev->dev_private = (void *)dev_priv;
+
+#if 0
+	base = drm_get_resource_start(dev, 1);
+	size = drm_get_resource_len(dev, 1);
+#endif
+	//if ( ret ) kfree( dev_priv );
+	idr_init(&dev_priv->object_idr);
+
+	printk(KERN_ERR "DRM: mali_driver_load done\n");
+
+	return ret;
+}
+
+static int mali_driver_unload(struct drm_device *dev)
+{
+	drm_mali_private_t *dev_priv = dev->dev_private;
+	printk(KERN_ERR "DRM: mali_driver_unload start\n");
+	idr_destroy(&dev_priv->object_idr);
+
+	kfree(dev_priv);
+	//kfree( dev_priv );
+	printk(KERN_ERR "DRM: mali_driver_unload done\n");
+
+	return 0;
+}
+static int mali_driver_open(struct drm_device *dev, struct drm_file *file)
+{
+	struct mali_file_private *file_priv;
+	file_priv = kmalloc(sizeof(*file_priv), GFP_KERNEL);
+	if (!file_priv)
+		return -ENOMEM;
+	file->driver_priv = file_priv;
+	INIT_LIST_HEAD(&file_priv->obj_list);
+	return 0;
+}
+static void mali_driver_postclose(struct drm_device *dev, struct drm_file *file)
+{
+	struct mali_file_private *file_priv = file->driver_priv;
+
+	kfree(file_priv);
+}
+
+static struct file_operations mali_driver_fops = {
+	.owner = THIS_MODULE,
+	.open = drm_open,
+	.release = drm_release,
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,39)
+	.ioctl = drm_ioctl,
+#else
+	.unlocked_ioctl = drm_ioctl,
+#endif
+	.mmap = drm_legacy_mmap,
+	.poll = drm_poll,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl = drm_compat_ioctl,
+#endif
+};
+
+static struct drm_driver driver =
+{
+	.driver_features = 0,
+	.load = mali_driver_load,
+	.unload = mali_driver_unload,
+	.open = mali_driver_open,
+	.preclose = mali_reclaim_buffers_locked,
+	.postclose = mali_driver_postclose,
+	.context_dtor = NULL,
+	.dma_quiescent = mali_idle,
+	.lastclose = mali_lastclose,
+	.ioctls = mali_ioctls,
+	.fops = &mali_driver_fops,
+	.name = DRIVER_NAME,
+	.desc = DRIVER_DESC,
+	.date = DRIVER_DATE,
+	.major = DRIVER_MAJOR,
+	.minor = DRIVER_MINOR,
+	.patchlevel = DRIVER_PATCHLEVEL,
+};
 static int mali_platform_drm_probe(struct platform_device *pdev)
 {
-	return 0;
+	return drm_platform_init(&driver, pdev);
 }
 
 static int mali_platform_drm_remove(struct platform_device *pdev)
@@ -38,8 +139,7 @@ static int mali_platform_drm_resume(struct platform_device *dev)
 
 
 static char mali_drm_device_name[] = "mali_drm";
-static struct platform_driver platform_drm_driver =
-{
+static struct platform_driver mali_pdriver = {
 	.probe = mali_platform_drm_probe,
 	.remove = mali_platform_drm_remove,
 	.suspend = mali_platform_drm_suspend,
@@ -50,111 +150,25 @@ static struct platform_driver platform_drm_driver =
 	},
 };
 
-#if 0
-static const struct drm_device_id dock_device_ids[] =
-{
-	{"MALIDRM", 0},
-	{"", 0},
-};
-#endif
-
-static int mali_driver_load(struct drm_device *dev, unsigned long chipset)
-{
-	int ret;
-	unsigned long base, size;
-	drm_mali_private_t *dev_priv;
-	printk(KERN_ERR "DRM: mali_driver_load start\n");
-
-	dev_priv = drm_calloc(1, sizeof(drm_mali_private_t), DRM_MEM_DRIVER);
-
-	if (dev_priv == NULL)
-	{
-		return -ENOMEM;
-	}
-
-	dev->dev_private = (void *)dev_priv;
-
-	if (NULL == dev->platformdev)
-	{
-		dev->platformdev = platform_device_register_simple(mali_drm_device_name, 0, NULL, 0);
-		pdev = dev->platformdev;
-	}
-
-#if 0
-	base = drm_get_resource_start(dev, 1);
-	size = drm_get_resource_len(dev, 1);
-#endif
-	ret = drm_sman_init(&dev_priv->sman, 2, 12, 8);
-
-	if (ret)
-	{
-		drm_free(dev_priv, sizeof(dev_priv), DRM_MEM_DRIVER);
-	}
-
-	//if ( ret ) kfree( dev_priv );
-
-	printk(KERN_ERR "DRM: mali_driver_load done\n");
-
-	return ret;
-}
-
-static int mali_driver_unload(struct drm_device *dev)
-{
-	drm_mali_private_t *dev_priv = dev->dev_private;
-	printk(KERN_ERR "DRM: mali_driver_unload start\n");
-
-	drm_sman_takedown(&dev_priv->sman);
-	drm_free(dev_priv, sizeof(*dev_priv), DRM_MEM_DRIVER);
-	//kfree( dev_priv );
-	printk(KERN_ERR "DRM: mali_driver_unload done\n");
-
-	return 0;
-}
-
-static struct drm_driver driver =
-{
-	.driver_features = DRIVER_USE_PLATFORM_DEVICE,
-	.load = mali_driver_load,
-	.unload = mali_driver_unload,
-	.context_dtor = NULL,
-	.dma_quiescent = mali_idle,
-	.reclaim_buffers = NULL,
-	.reclaim_buffers_idlelocked = mali_reclaim_buffers_locked,
-	.lastclose = mali_lastclose,
-	.get_map_ofs = drm_core_get_map_ofs,
-	.get_reg_ofs = drm_core_get_reg_ofs,
-	.ioctls = mali_ioctls,
-	.fops = {
-		.owner = THIS_MODULE,
-		.open = drm_open,
-		.release = drm_release,
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,39)
-		.ioctl = drm_ioctl,
-#else
-		.unlocked_ioctl = drm_ioctl,
-#endif
-		.mmap = drm_mmap,
-		.poll = drm_poll,
-		.fasync = drm_fasync,
-	},
-	.name = DRIVER_NAME,
-	.desc = DRIVER_DESC,
-	.date = DRIVER_DATE,
-	.major = DRIVER_MAJOR,
-	.minor = DRIVER_MINOR,
-	.patchlevel = DRIVER_PATCHLEVEL,
-};
 
 static int __init mali_init(void)
 {
+	int ret;
+	struct platform_device *pdev;
 	driver.num_ioctls = mali_max_ioctl;
-	return drm_init(&driver);
+	ret = platform_driver_register(&mali_pdriver);
+	if (ret)
+		goto out;
+	pdev = platform_device_register_simple(mali_drm_device_name, 0, NULL, 0);
+	if (IS_ERR(pdev))
+		ret = PTR_ERR(pdev);
+out:
+	return ret;
 }
 
 static void __exit mali_exit(void)
 {
 	platform_device_unregister(pdev);
-	drm_exit(&driver);
 }
 
 module_init(mali_init);
