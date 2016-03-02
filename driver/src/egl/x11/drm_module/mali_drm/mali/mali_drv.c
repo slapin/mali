@@ -27,7 +27,6 @@ static const struct drm_device_id dock_device_ids[] =
 
 static int mali_driver_load(struct drm_device *dev, unsigned long chipset)
 {
-	int ret;
 	drm_mali_private_t *dev_priv;
 	printk(KERN_ERR "DRM: mali_driver_load start\n");
 
@@ -49,7 +48,7 @@ static int mali_driver_load(struct drm_device *dev, unsigned long chipset)
 
 	printk(KERN_ERR "DRM: mali_driver_load done\n");
 
-	return ret;
+	return 0;
 }
 
 static int mali_driver_unload(struct drm_device *dev)
